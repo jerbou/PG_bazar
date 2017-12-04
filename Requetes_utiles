@@ -1,0 +1,286 @@
+-- === Requetes utiles ===
+
+-- 1 : OPERATIONS GEOGRAPHIQUES SUR TABLE
+-- 1.1 : deplacer table dans un autre schema
+ALTER TABLE bd_carthage.aesn_unites_hydrographiques SET SCHEMA hydro_ae;
+-- CREATE TABLE "hydro_AE".aesn_bv_masseseau AS SELECT * from bd_carthage.aesn_bv_masseseau; ne prend pas en compte les dependances index et sequences
+ALTER TABLE corine_land_cover.clc2006_picardie_exact SET SCHEMA bd_occup_sol ;
+
+-- definir GEOMETRIE
+ALTER TABLE bd_site_cen.geo_site
+ALTER COLUMN geom TYPE geometry(multipolygon,2154);
+
+ALTER TABLE agricole.rpg_2012_060
+ALTER COLUMN geom TYPE geometry(multipolygon,2154);
+
+ALTER TABLE agricole.maet_maet_pic_2007 RENAME TO maet_pic_2007
+ALTER COLUMN geom TYPE geometry(multipolygon,2154);
+
+-- peuplement des geometrie
+SELECT Populate_Geometry_Columns('bd_occup_sol.clc2000_picardie_exact_2'::regclass);
+
+-- index geo GIST
+CREATE INDEX clc2000_picardie_exact_gis ON bd_occup_sol.clc2000_picardie_exact USING GIST (geom);
+
+-- identification des types de geometrie
+select st_geometryType (geom) from suivi_travaux.travaux_phase1_line_to_poly
+group by st_geometryType (geom) 
+
+-- Reprojection en une opération (de Lambert 2 etendu 27572 a 2154)
+-- http://postgis.net/docs/UpdateGeometrySRID.html
+ALTER TABLE reseau_sites.tampon_pelouses
+ALTER COLUMN geom TYPE geometry(polygon,2154) 
+USING ST_Transform(ST_SetSRID(geom, 27572),2154)
+
+-- compter le nombre de geometrie selon le type
+-- http://www.faqoverflow.com/gis/28835.html
+SELECT COUNT(CASE WHEN ST_NumGeometries(geom) > 1 THEN 1 END) AS multi_geom,
+       COUNT(geom) AS total_geom
+FROM agricole.rpg_2012_002;
+
+-- Passe en multipolygone
+CREATE TABLE agricole.rpg_2012_060_2 AS (
+	SELECT (ST_Multi(geom)) as geom, id_dreal, nom, commune, surface_ha, lien_arret, shape_area
+	from perimetre.regionsnaturelles
+	);
+
+ALTER TABLE perimetre.zsc
+ALTER COLUMN geom TYPE geometry(polygon,2154); 
+
+-- Passe de multi a des polygones simples
+CREATE TABLE bd_occup_sol.clc2006_picardie_exact_2 AS (
+	SELECT id, code_06, niveau_1, niveau_2,libelle_1, libelle_2, code_csnp, libelle_csnp,  (ST_Dump(geom)).geom as geom, shape_length, shape_area
+	from bd_occup_sol.clc2006_picardie_exact
+	);
+
+-- Calcul de la surface
+-- pour une colonne geographique WGS84
+UPDATE your_table SET area=ST_AREA(geom::geography);
+
+-- pour une colonne projeté
+UPDATE your_table SET area=ST_AREA(geom);
+
+-- ======== 2  : requetes  de table  ========
+-- OPERATIONS LISTER LES CHAMPS
+-- http://dba.stackexchange.com/questions/22362/how-do-i-list-all-columns-for-a-specified-table
+SELECT *
+FROM information_schema.columns
+WHERE table_schema = 'agricole'
+-- avec un AND pour une table particuler
+  AND table_name   = 'maet_pi_pel_20071011'
+-- SANS pour avoir toutes les tables de tout le schema
+
+-- Creation de la table recensant tout les champs
+CREATE TABLE docob.liste_champs AS (
+SELECT *
+FROM information_schema.columns
+WHERE table_schema = 'docob' )
+
+
+select *
+from pg_catalog.pg_namespace;
+
+-- Voir les commentaires des tables
+-- http://stackoverflow.com/questions/5664094/getting-list-of-table-comments-in-postgresql
+SELECT obj_description(oid)
+FROM pg_class
+WHERE relkind = 'r' and obj_description(oid) IS NOT NULL
+
+select * from pg_class
+
+-- LISTER LES COMMENTAIRES DES COLUMNES POUR LES TABLES
+-- http://stackoverflow.com/questions/343138/retrieving-comments-from-a-postgresql-db
+SELECT c.table_schema,c.table_name,c.column_name,pgd.description
+FROM pg_catalog.pg_statio_all_tables as st
+  inner join pg_catalog.pg_description pgd on (pgd.objoid=st.relid)
+  inner join information_schema.columns c on (pgd.objsubid=c.ordinal_position
+    and  c.table_schema=st.schemaname and c.table_name=st.relname);
+
+-- ========= 3 GESTION DE DONNEES  des donnees =========
+-- extraction de caractere a partir d un integer date
+select left(cast(date_invent as char(8)),4) as "Date_annee"
+from suivi_sci.points_suivi_tot_2015
+
+select "date_invent", substring(cast(date_invent as char(8)) from 5 for 2) as "Date_annee"
+from suivi_sci.points_suivi_tot_2015
+
+select "date_invent", substring(cast(date_invent as char(8)) from 7 for 2) as "Date_jour"
+from suivi_sci.points_suivi_tot_2015
+
+-- extraction la date d aoujourdhui (probleme de 0 avec les 9 premiers mois de l annee
+select extract(day from (current_date))|| '/' || extract (month from (current_date)) || '/' || extract(year from (current_date))
+
+-- http://stackoverflow.com/questions/13726255/postgres-create-table-but-name-is-current-month
+
+--http://www.thegeekstuff.com/2010/07/8-postgresql-date-and-time-function-examples/
+select now()::date
+
+-- pour deplace plusieurs tables en une fois
+-- http://stackoverflow.com/questions/10218768/change-schema-of-multiple-postgresql-tables-in-one-operation
+
+DO
+$$
+DECLARE
+    row record;
+BEGIN
+    FOR row IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename ilike '%atlas%' -- and other conditions, if needed
+    LOOP
+        EXECUTE 'ALTER TABLE public.' || quote_ident(row.tablename) || ' SET SCHEMA risques_naturels;';
+    END LOOP;
+END;
+$$;
+
+-- Pour renommer un champs dans plusieurs table 
+-- http://stackoverflow.com/questions/8424258/mass-rename-columns-postgresql
+
+SELECT 'ALTER TABLE ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+    || ' RENAME column ' || quote_ident(a.attname) || ' TO geom;'
+FROM   pg_catalog.pg_attribute a
+JOIN   pg_catalog.pg_class c ON c.oid = a.attrelid
+JOIN   pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE  a.attnum >= 1
+AND    a.atttypid = 'geometry'::regtype::oid
+AND    a.attname = 'wkb_geometry'
+AND    NOT a.attisdropped
+AND    n.nspname !~~ 'pg_%'  -- exclude catalog & temp tables, to be sure
+AND    n.nspname = 'reseau_sites'  -- target specific schema only?
+
+-- SELECTION de tous les champs d une table a l exepction d un seul
+-- http://www.postgresonline.com/journal/archives/41-How-to-SELECT-ALL-EXCEPT-some-columns-in-a-table.html
+-- http://dba.stackexchange.com/questions/1957/sql-select-all-columns-except-some
+
+SELECT 'SELECT ' || array_to_string(ARRAY(SELECT 'o' || '.' || c.column_name
+        FROM information_schema.columns As c
+            WHERE table_name = 'n_site_classe_picardie' 
+            AND  c.column_name NOT IN('geom')
+    ), ',') || ' FROM n_site_classe_picardie As o' As sqlstmt
+
+
+/* Donne la requete en texte ".." e copier coller ensuite
+*/
+
+--- =========== VERIFICATION DE L INTEGRITE DES COUCHES par schema
+SELECT * FROM geometry_columns where f_table_schema LIKE '%corine%';
+
+-- ===== REQUETE 
+-- cas d un string avec un guillement qui fait sauter la syntaxe, REMEDE on place des doubles guillements
+UPDATE agence_eau."AESN_zdh" SET label_type = 'Mosaïques d''entités de moins d''un hectare' WHERE TYPE ='8'
+
+
+/* ================ ATTENTION GESTION DE DONNEES ======================
+-- creation d une table char(255) est fixe
+si maj avec caractere de longueur inferieur , le champ est rempli d espace 
+DONC ATTENTION A SYSTEMATISER LA CREATION DE CHAMPS AVEC varchar
+
+*/
+-- Import d'un fichier csv
+-- necessite la creation d une table avec la meme structure
+LOAD DATA LOCAL INFILE 'O:\Eq.Regionale\MVO\Projet Euphorbe-965EUP\Stage Fanny.L\Doc euphorbe\Suivi travaux 2014\Docs suivi\JB_import_06_07_2015.csv' INTO TABLE inpn.taxrefv80 FIELDS ENCLOSED BY ';';
+
+
+-- 3 ====== GESTION de DROITS ========
+
+GRANT USAGE ON SCHEMA bd_parcellaire TO utilisateur;
+GRANT USAGE ON SCHEMA bd_topo_02 TO utilisateur;
+GRANT USAGE ON SCHEMA bd_topo_60 TO utilisateur;
+GRANT USAGE ON SCHEMA bd_topo_80 TO utilisateur;
+GRANT USAGE ON SCHEMA perimetre TO utilisateur;
+GRANT USAGE ON SCHEMA agence_eau TO utilisateur;
+GRANT USAGE ON SCHEMA agricole TO utilisateur;
+GRANT USAGE ON SCHEMA reseau_sites TO utilisateur;
+GRANT USAGE ON SCHEMA bd_carthage TO utilisateur;
+GRANT USAGE ON SCHEMA bd_occup_sol TO utilisateur;
+
+
+
+-- 4 ============== SEMIOLOGIE PAR DEFAUT ======================
+
+/* Certaines couches n apparaissent pas comme ocs de geopicardie
+A voir dans le detail des droits pour chacune des couches
+
+2EME WARNING : Couleur par defaut postgres en s affichent en session user
+
+*/
+DROP TABLE layer_style_COPY
+CREATE TABLE layer_style_COPY AS (select * from layer_styles where f_table_schema ='bd_occup_sol' or f_table_schema ='bd_parcellaire')
+
+select * from layer_styles where f_table_schema ='bd_occup_sol' or f_table_schema ='bd_parcellaire'
+
+-- on cree un table copy en changeant l util
+UPDATE layer_style_COPY SET owner ='utilisateur'
+
+select * from layer_styles where f_table_schema ='bd_occup_sol' or f_table_schema ='bd_parcellaire' limit 2
+
+-- reste plus au a inserer dans layer_styles initiale
+-- nextval('suivi_travaux."travaux_points_FL_gid_seq"'::regclass)
+
+INSERT into layer_styles select 
+-- id = nextval('layer_styles_id_seq'::regclass),
+nextval('layer_styles_id_seq'::regclass),
+ f_table_catalog, 
+ f_table_schema, 
+ f_table_name, 
+ f_geometry_column, 
+ stylename, 
+ styleqml, 
+ stylesld, 
+ useasdefault, 
+ description, 
+ owner, 
+ ui, 
+ update_time 
+	from layer_style_COPY
+-- REQUETE OK
+
+UPDATE layer_styles SET owner ='util' where owner ='utilisateur'
+-- que ce soit utilisateur ou util on arrive pas a voir
+
+-- On enleve
+DELETE FROM layer_styles where owner ='util'
+
+/* on essaye de sauvegarder les styles via Qgis mais le manque de droits de util nous l'interdit
+'Impossible de sauvegarder le style de la couche. Il n est pas possible de creer la table de destination dans la base.
+C est pt du a un manque de permission de l utilisateur (util)
+
+-- Impossible de sauvegarder les styles
+*/
+-- == PROBLEME RESOLU : ROLE SELECT A METTRE SUR util pour acceder a layer_styles
+-- http://gis.stackexchange.com/questions/91727/qgis-postgis-layer-styles
+
+GRANT SELECT ON TABLE public.layer_styles TO util;
+
+*/
+
+
+SELECT 'SELECT ' || array_to_string(ARRAY(SELECT 'o' || '.' || c.column_name
+        FROM information_schema.columns As c
+            WHERE table_name = 'layer_style_COPY' 
+            AND  c.column_name NOT IN('id')
+    ), ',') || ' FROM layer_style_COPY As o' As sqlstmt
+
+
+select nextval() from layer_styles 
+
+-- ============= COMMENTAIRES =======================
+COMMENT ON TABLE bd_carthage.zone_hydrographique
+  IS 'BD CARTHAGE 2014';
+
+SELECT * FROM information_schema.tables 
+WHERE table_schema = 'bd_carthage'
+
+-- renommer un schema
+ALTER schema bd_carthage RENAME TO hydrographie
+
+-- mettre a jour la label_style
+UPDATE layer_styles SET f_table_schema ='hydrographie' where f_table_schema ='bd_carthage'
+
+
+
+-- ========= MISE A JOUR AVEC JOINTURE =======
+-- Requet de MAJ avec jointure
+-- http://stackoverflow.com/questions/2815953/update-query-with-join-on-two-tables
+UPDATE referentiels_geo."RPG_2012_BFC"
+SET libelle = b.libelle
+FROM referentiels_geo."RPG_2012_BFC" as a
+JOIN referentiels_geo."RPG_2012_ Codes_groupes_cultures_et_couleurs" as b
+ON a."CULT_MAJ" = b."Valeur"
