@@ -97,6 +97,14 @@ FROM pg_catalog.pg_statio_all_tables as st
     and  c.table_schema=st.schemaname and c.table_name=st.relname);
 
 -- ========= 3 GESTION DE DONNEES  des donnees =========
+-- select avec plusieurs likes 
+-- https://stackoverflow.com/questions/2245536/sql-combining-multiple-like-queries
+drop table datageo_ref.geo_rpls2017_bfc
+create table datageo_ref.geo_rpls2017_bfc as 
+select * from datageo_ref."geo-rpls2017" where depcom SIMILAR TO '25%|39%|70%|90%|21%|71%|89%|58%' 
+
+-- select * from datageo_ref."geo-rpls2017" where depcom like '70*' 
+
 -- extraction de caractere a partir d un integer date
 select left(cast(date_invent as char(8)),4) as "Date_annee"
 from suivi_sci.points_suivi_tot_2015
