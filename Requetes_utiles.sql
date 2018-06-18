@@ -33,7 +33,7 @@ ALTER COLUMN geom TYPE geometry(polygon,2154)
 USING ST_Transform(ST_SetSRID(geom, 27572),2154)
 
 -- compter le nombre de geometrie selon le type
--- http://www.faqoverflow.com/gis/28835.html
+-- 
 SELECT COUNT(CASE WHEN ST_NumGeometries(geom) > 1 THEN 1 END) AS multi_geom,
        COUNT(geom) AS total_geom
 FROM agricole.rpg_2012_002;
