@@ -103,6 +103,72 @@ drop table datageo_ref.geo_rpls2017_bfc
 create table datageo_ref.geo_rpls2017_bfc as 
 select * from datageo_ref."geo-rpls2017" where depcom SIMILAR TO '25%|39%|70%|90%|21%|71%|89%|58%' 
 
+
+CREATE INDEX index_code_com ON public.sirene_geoloc_fr
+(
+    plg_code_commune
+);
+
+select * from public.sirene_geoloc_fr where
+plg_code_commune ='21292'
+
+
+create table public.sirene_geoloc_bfc as 
+select * from public.sirene_geoloc_fr where plg_code_commune SIMILAR TO '25%|39%|70%|90%|21%|71%|89%|58%' 
+
+-- select * from public.sirene_geoloc_fr where plg_code_commune = '25%' marche pas car type bigint
+
+select * from public.sirene_geoloc_fr where plg_code_commune::text LIKE '21%'
+-- Successfully run. Total query runtime: 1 min 53 secs.
+-- 270449 rows affected.
+
+-- select * from public.sirene_geoloc_fr where plg_code_commune::text LIKE '21%|39%'
+-- ne marche pas puisque deux conditions
+
+select * from public.sirene_geoloc_fr where plg_code_commune::text LIKE '21%' OR plg_code_commune::text LIKE '39%'
+-- Successfully run. Total query runtime: 1 min 53 secs.
+-- 383001 rows affected.
+
+CREATE TABLE public.sirene_geoloc_2139 as
+select * from public.sirene_geoloc_fr where plg_code_commune::text LIKE '21%' OR plg_code_commune::text LIKE '39%'
+-- SELECT 383001
+-- Query returned successfully in 1 min 49 secs.
+
+
+SELECT DropGeometryColumn ('public','sirene_geoloc_fr','geom');
+-- public.sirene_geoloc_fr.geom effectively removed.
+
+-- selection de valeur parmis un bigint avec une expression LIKE
+CREATE TABLE public.sirene_geoloc_bfc as
+select * from public.sirene_geoloc_fr where 
+plg_code_commune::text LIKE '21%' OR 
+plg_code_commune::text LIKE '25%' OR 
+plg_code_commune::text LIKE '39%' OR
+plg_code_commune::text LIKE '58%' OR
+plg_code_commune::text LIKE '70%' OR
+plg_code_commune::text LIKE '71%' OR
+plg_code_commune::text LIKE '89%' OR
+plg_code_commune::text LIKE '90%'
+
+ADD TABLE
+--SELECT 1085610
+-- Query returned successfully in 1 min 37 secs.
+
+ALTER TABLE public.sirene_geoloc_bfc ADD COLUMN geom geometry(Point, 2154);
+--Then use ST_SetSrid and ST_MakePoint to populate the column:
+UPDATE public.sirene_geoloc_bfc SET geom = ST_SetSRID(ST_MakePoint(x, y), 2154);
+
+SELECT Populate_Geometry_Columns('public.sirene_geoloc_bfc'::regclass);
+
+-- creation de l index geom
+DROP INDEX sirene_geoloc_bfc_idx;
+CREATE INDEX sirene_geoloc_bfc_idx
+  ON public.sirene_geoloc_bfc
+  USING GIST (geom);
+-- http://postgis.net/workshops/postgis-intro/indexing.html
+
+-- TO DO : supprimer les lignes dont les code communes ont a 4 caracteres...
+
 -- select * from datageo_ref."geo-rpls2017" where depcom like '70*' 
 
 -- extraction de caractere a partir d un integer date
